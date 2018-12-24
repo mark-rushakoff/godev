@@ -20,6 +20,7 @@ godev -s SHA [...]
 godev -S SHA [...]
 \tLike godev -s SHA, but if SHA is not a known commit, godev first attempts to build it,
 \tand if SHA is not a known commit, then godev fetch is run and the build is reattempted.
+\tgodev -S tip is not accepted; use lowercase -s instead.
 
 godev fetch
 \tSynchronizes godev's git clone of the Go project with what is currently on github.
@@ -72,8 +73,25 @@ function execBuild() {
 
   local sha="$1"
   local fullSHA
-  fullSHA="$(gogit rev-parse "$sha^{commit}")"
+  if [ "$sha" = 'tip' ]; then
+    # Special case: fetch and build origin/master.
+    gogit fetch
+    fullSHA="$(gogit rev-parse 'master')"
+  else
+    fullSHA="$(gogit rev-parse "$sha^{commit}")"
+  fi
 
+  execBuildFullSHA "$fullSHA"
+
+  if [ "$sha" = 'tip' ]; then
+    # It would be nice to just ln -sf, but if the tip directory already exists,
+    # that will create a new recursive softlink to $fullSHA.
+    rm -f "$GOBINROOT/tip"
+    ln -s "$GOBINROOT/$fullSHA" "$GOBINROOT/tip"
+  fi
+}
+
+function execBuildFullSHA() {
   local binDir="$GOBINROOT/$fullSHA"
   if [ -x "$binDir/go" ]; then
     >&2 echo "go binary for $fullSHA already exists."
@@ -94,7 +112,18 @@ function execBuild() {
 function execRun() {
   local sha="$1"
   local fullSHA
-  fullSHA="$(gogit rev-parse "$sha^{commit}")"
+  if [ "$sha" = 'tip' ]; then
+    local tipDir="$GOBINROOT/tip"
+    if [ ! -d "$tipDir" ]; then
+      >&2 echo "go tip has never been built."
+      >&2 echo "Run 'godev build tip'."
+      return 1
+    fi
+    # Unclear if there's a more portable way to retrieve the full SHA other than following the tip symlink.
+    fullSHA="$(cd -P "$tipDir" && basename "$(pwd)")"
+  else
+    fullSHA="$(gogit rev-parse "$sha^{commit}")"
+  fi
 
   shift
 
