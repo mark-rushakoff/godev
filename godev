@@ -1,0 +1,169 @@
+#!/bin/bash
+set -euo pipefail
+
+function usageGlobal() {
+  2>&1 printf \
+"godev helps you manage many source installations of Go.
+
+Available commands:
+
+godev build SHA
+\tBuilds Go from the given SHA. If SHA is the special string 'tip',
+\tgodev attempts to pull the latest revision from github
+\tand build what is on the master branch.
+
+godev -s SHA [...]
+\tRuns a built Go matching SHA, passing the rest of the command line to that go command.
+\tIf SHA is the special string 'tip', godev runs the version of Go most recently built as 'tip'.
+\tIf SHA is not a known and built commit, godev fails.
+
+godev -S SHA [...]
+\tLike godev -s SHA, but if SHA is not a known commit, godev first attempts to build it,
+\tand if SHA is not a known commit, then godev fetch is run and the build is reattempted.
+
+godev fetch
+\tSynchronizes godev's git clone of the Go project with what is currently on github.
+
+NOT YET IMPLEMENTED:
+
+godev list
+\tPrints out available builds.
+
+godev clear-goroot-cache
+\tDeletes all source checkouts to free disk space.
+\tThe source checkout will be lazily restored the next time the corresponding Go build is used.
+"
+}
+
+GDDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
+GOGITDIR="$GDDIR/data/go.git"
+GOSRCROOT="$GDDIR/data/go-src"
+GOBINROOT="$GDDIR/data/go-bin"
+
+# Internals:
+# $GOGITDIR holds bare clone of golang/go
+# $GOSRCROOT is where git worktrees go
+# $GOBINROOT is where built go binaries live
+#   $GOBINROOT/$FULL_SHA is set as GOBIN when running make.bash
+#   Maybe TODO: $GOBINROOT/$COMMIT_DATE is a symlink to corresponding $FULL_SHA ?
+
+function gogit() {
+  git --git-dir "$GOGITDIR" "$@"
+}
+
+function initGoGit() {
+  if ! gogit rev-parse > /dev/null 2>&1 ; then
+    >&2 echo "It looks like godev has not cloned go yet; cloning now..."
+    git clone --bare https://github.com/golang/go.git "$GOGITDIR"
+  fi
+}
+
+function execFetch() {
+  # TODO: handle -h / --help or $# > 0.
+  initGoGit
+  gogit fetch
+}
+
+function execBuild() {
+  # TODO: handle -h / --help
+  # TODO: handle tip
+
+  initGoGit
+
+  local sha="$1"
+  local fullSHA
+  fullSHA="$(gogit rev-parse "$sha^{commit}")"
+
+  if [ -d "$GOBINROOT/$fullSHA" ]; then
+    >&2 echo "Binary for $fullSHA already exists."
+    return
+  fi
+
+  local srcDir="$GOSRCROOT/$fullSHA"
+  # Binary doesn't exist. Chances are the source tree doesn't exist either,
+  # but don't attempt to add the worktree again if we don't need to.
+  if [ ! -d "$srcDir" ]; then
+    gogit worktree add "$srcDir" "$fullSHA"
+  fi
+
+  # Make it!
+  (cd "$srcDir/src" && GOBIN="$GOBINROOT/$fullSHA" ./make.bash)
+}
+
+function execRun() {
+  local sha="$1"
+  local fullSHA
+  fullSHA="$(gogit rev-parse "$sha^{commit}")"
+
+  shift
+
+  local binDir="$GOBINROOT/$fullSHA"
+  if [ ! -d "$binDir" ]; then
+    >&2 echo "go revision $sha has not been built."
+    >&2 echo "Run 'godev build $sha' or use 'godev -S $sha' to lazily build it."
+    return 1
+  fi
+
+  local srcDir="$GOSRCROOT/$fullSHA"
+  if [ ! -d "$srcDir" ]; then
+    gogit worktree add "$srcDir" "$fullSHA"
+  fi
+
+  "$binDir/go" "$@"
+}
+
+function execRunLazyBuild() {
+  initGoGit
+
+  local sha="$1"
+  local fullSHA
+  fullSHA="$(gogit rev-parse "$sha^{commit}")"
+
+  shift
+
+  local binDir="$GOBINROOT/$fullSHA"
+  if [ ! -d "$binDir" ]; then
+    execBuild "$fullSHA"
+  fi
+  local srcDir="$GOSRCROOT/$fullSHA"
+  if [ ! -d "$srcDir" ]; then
+    gogit worktree add "$srcDir" "$fullSHA"
+  fi
+
+  "$binDir/go" "$@"
+}
+
+if [ "$#" == "0" ]; then
+  usageGlobal
+  exit 1
+fi
+
+case "$1" in
+  -h | --help)
+    usageGlobal
+    exit 0
+    ;;
+  fetch)
+    shift
+    execFetch
+    exit 0
+    ;;
+  build)
+    shift
+    execBuild "$@"
+    exit $?
+    ;;
+  -s)
+    shift
+    execRun "$@"
+    exit $?
+    ;;
+  -S)
+    shift
+    execRunLazyBuild "$@"
+    exit $?
+    ;;
+  *)
+    usageGlobal
+    exit 1
+esac
