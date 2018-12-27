@@ -55,7 +55,7 @@ function gogit() {
 function initGoGit() {
   if ! gogit rev-parse > /dev/null 2>&1 ; then
     >&2 echo "It looks like godev has not cloned go yet; cloning now..."
-    git clone --bare https://github.com/golang/go.git "$GOGITDIR"
+    git clone --mirror https://github.com/golang/go.git "$GOGITDIR"
   fi
 }
 
