@@ -25,10 +25,10 @@ godev -S SHA [...]
 godev fetch
 \tSynchronizes godev's git clone of the Go project with what is currently on github.
 
-NOT YET IMPLEMENTED:
-
 godev list
 \tPrints out available builds.
+
+NOT YET IMPLEMENTED:
 
 godev clear-goroot-cache
 \tDeletes all source checkouts to free disk space.
@@ -192,6 +192,28 @@ function execList() {
   ) | sort -r
 }
 
+function execClearGorootCache() {
+  # TODO: handle -h/--help
+  # TODO: handle -n/--dry-run
+  # TODO: reject $# > 0
+
+  if [ ! -d "$GOSRCROOT" ]; then
+    >&2 echo "Source tree root does not exist."
+    return 1
+  fi
+
+  initGoGit
+
+  (
+    cd "$GOSRCROOT"
+    for dir in ./*; do
+      # Avoid weird error if glob didn't match anything.
+      [ -e "$dir" ] || continue
+      gogit worktree remove "$dir"
+    done
+  )
+}
+
 if [ "$#" == "0" ]; then
   usageGlobal
   exit 1
@@ -227,6 +249,12 @@ case "$1" in
     execRunLazyBuild "$@"
     exit $?
     ;;
+  # Don't enable this yet. It blows away GOTOOLDIR, which makes cache restoration useless.
+  # clear-goroot-cache)
+  #   shift
+  #   execClearGorootCache "$@"
+  #   exit $?
+  #   ;;
   *)
     usageGlobal
     exit 1
