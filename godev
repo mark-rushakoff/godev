@@ -106,7 +106,7 @@ function execBuildFullSHA() {
   fi
 
   # Make it!
-  (cd "$srcDir/src" && GOBIN="$GOBINROOT/$fullSHA" ./make.bash && mkdir -p "$binDir" && mv "$srcDir/bin/go" "$binDir/go")
+  (cd "$srcDir/src" && ./make.bash && mkdir -p "$binDir" && mv "$srcDir/bin/go" "$binDir/go")
 }
 
 function execRun() {
@@ -164,6 +164,34 @@ function execRunLazyBuild() {
   "$binDir/go" "$@"
 }
 
+function execList() {
+  # TODO: handle -h/--help
+  # TODO: reject $# > 0
+
+  if [ ! -d "$GOBINROOT" ]; then
+    >&2 echo "No version of go has been built yet."
+    return 1
+  fi
+
+  initGoGit
+
+  # The commit timestamp for Go commits always moves forward,
+  # so we can reliably sort based on commit time.
+
+  # shellcheck disable=2046
+  gogit show -s --format="%ci [%h] %s" $(
+    cd "$GOBINROOT"
+    for dir in *; do
+      # Avoid weird error if glob didn't match anything.
+      [ -e "$dir" ] || continue
+      # Skip tip, since we're looking for SHAs.
+      [ "$dir" = tip ] && continue
+
+      echo "$dir^{commit}"
+    done
+  ) | sort -r
+}
+
 if [ "$#" == "0" ]; then
   usageGlobal
   exit 1
@@ -182,6 +210,11 @@ case "$1" in
   build)
     shift
     execBuild "$@"
+    exit $?
+    ;;
+  list)
+    shift
+    execList "$@"
     exit $?
     ;;
   -s)
