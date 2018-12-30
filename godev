@@ -55,14 +55,17 @@ function gogit() {
 function initGoGit() {
   if ! gogit rev-parse > /dev/null 2>&1 ; then
     >&2 echo "It looks like godev has not cloned go yet; cloning now..."
-    git clone --mirror https://github.com/golang/go.git "$GOGITDIR"
+    git clone --bare https://github.com/golang/go.git "$GOGITDIR"
+    gogit remote remove origin # Avoid any renaming shenanigans on a bare repo.
+    gogit remote add github https://github.com/golang/go.git # Github first since it should have better throughput.
+    gogit remote add google https://go.googlesource.com/go
   fi
 }
 
 function execFetch() {
   # TODO: handle -h / --help or $# > 0.
   initGoGit
-  gogit fetch
+  gogit fetch github master:master
 }
 
 function execBuild() {
@@ -75,7 +78,7 @@ function execBuild() {
   local fullSHA
   if [ "$sha" = 'tip' ]; then
     # Special case: fetch and build origin/master.
-    gogit fetch
+    execFetch
     fullSHA="$(gogit rev-parse 'master')"
   else
     fullSHA="$(gogit rev-parse "$sha^{commit}")"
