@@ -28,7 +28,10 @@ godev fetch
 godev list
 \tPrints out available builds.
 
-godev clear-goroot-cache
+godev rm SHA
+\tDeletes binaries and source checkouts for the single given SHA.
+
+godev clear-source-cache
 \tDeletes all source checkouts to free disk space.
 \tThe source checkout will be lazily restored the next time the corresponding Go build is used.
 "
@@ -208,7 +211,32 @@ function execList() {
   ) | sort -r
 }
 
-function execClearGorootCache() {
+function execRemoveSHA() {
+  # TODO: handle -h/--help
+  # TODO: handle -n/--dry-run
+  # TODO: reject $# > 1
+  # TODO: handle when removing what tip links to?
+
+  initGoGit
+
+  local sha="$1"
+  local fullSHA
+  fullSHA="$(gogit rev-parse "$sha^{commit}")"
+
+  local srcDir="$GOSRCROOT/$fullSHA"
+  if [ -d "$srcDir" ]; then
+    gogit worktree remove "$srcDir"
+  fi
+
+  local binDir="$GOBINROOT/$fullSHA"
+  if [ ! -d "$binDir" ]; then
+    >&2 echo "No built binaries for $fullSHA."
+    return 1
+  fi
+  rm -rf "$binDir"
+}
+
+function execClearSourceCache() {
   # TODO: handle -h/--help
   # TODO: handle -n/--dry-run
   # TODO: reject $# > 0
@@ -265,9 +293,14 @@ case "$1" in
     execRunLazyBuild "$@"
     exit $?
     ;;
-  clear-goroot-cache)
+  rm)
     shift
-    execClearGorootCache "$@"
+    execRemoveSHA "$@"
+    exit $?
+    ;;
+  clear-source-cache)
+    shift
+    execClearSourceCache "$@"
     exit $?
     ;;
   *)
