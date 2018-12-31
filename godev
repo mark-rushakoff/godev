@@ -28,8 +28,6 @@ godev fetch
 godev list
 \tPrints out available builds.
 
-NOT YET IMPLEMENTED:
-
 godev clear-goroot-cache
 \tDeletes all source checkouts to free disk space.
 \tThe source checkout will be lazily restored the next time the corresponding Go build is used.
@@ -45,8 +43,6 @@ GOBINROOT="$GDDIR/data/go-bin"
 # $GOGITDIR holds bare clone of golang/go
 # $GOSRCROOT is where git worktrees go
 # $GOBINROOT is where built go binaries live
-#   The build go binary is moved to $GOBINROOT/$FULL_SHA/go.
-#   Maybe TODO: $GOBINROOT/$COMMIT_DATE is a symlink to corresponding $FULL_SHA ?
 
 function gogit() {
   git --git-dir "$GOGITDIR" "$@"
@@ -70,7 +66,6 @@ function execFetch() {
 
 function execBuild() {
   # TODO: handle -h / --help
-  # TODO: handle tip
 
   initGoGit
 
@@ -96,7 +91,7 @@ function execBuild() {
 
 function execBuildFullSHA() {
   local binDir="$GOBINROOT/$fullSHA"
-  if [ -x "$binDir/go" ]; then
+  if [ -x "$binDir/bin/go" ]; then
     >&2 echo "go binary for $fullSHA already exists."
     return
   fi
@@ -109,7 +104,19 @@ function execBuildFullSHA() {
   fi
 
   # Make it!
-  (cd "$srcDir/src" && ./make.bash && mkdir -p "$binDir" && mv "$srcDir/bin/go" "$binDir/go")
+  (cd "$srcDir/src" && ./make.bash)
+  linkBinAndTools "$srcDir" "$binDir"
+}
+
+function linkBinAndTools() {
+  local from="$1"
+  local to="$2"
+
+  (
+    cd "$from" &&
+    find bin pkg/tool -type d -exec mkdir -p "$to"/{} \; &&
+    find bin pkg/tool -type f -exec ln -f {} "$to"/{} \;
+  )
 }
 
 function execRun() {
@@ -139,10 +146,12 @@ function execRun() {
 
   local srcDir="$GOSRCROOT/$fullSHA"
   if [ ! -d "$srcDir" ]; then
+    >&2 echo "Restoring Go source tree..."
     gogit worktree add "$srcDir" "$fullSHA"
+    linkBinAndTools "$binDir" "$srcDir"
   fi
 
-  "$binDir/go" "$@"
+  "$binDir/bin/go" "$@"
 }
 
 function execRunLazyBuild() {
@@ -155,16 +164,20 @@ function execRunLazyBuild() {
   shift
 
   local binDir="$GOBINROOT/$fullSHA"
-  if [ ! -d "$binDir" ] || [ ! -x "$binDir/go" ]; then
+  if [ ! -d "$binDir" ] || [ ! -x "$binDir/bin/go" ]; then
+    # We didn't have the binary, so assume it needs built.
     >&2 echo "Building go revision $sha..."
     execBuild "$fullSHA"
   fi
   local srcDir="$GOSRCROOT/$fullSHA"
   if [ ! -d "$srcDir" ]; then
+    # We had the binary but the source dir appears to have been cleared.
+    >&2 echo "Restoring Go source tree..."
     gogit worktree add "$srcDir" "$fullSHA"
+    linkBinAndTools "$binDir" "$srcDir"
   fi
 
-  "$binDir/go" "$@"
+  "$binDir/bin/go" "$@"
 }
 
 function execList() {
@@ -252,12 +265,11 @@ case "$1" in
     execRunLazyBuild "$@"
     exit $?
     ;;
-  # Don't enable this yet. It blows away GOTOOLDIR, which makes cache restoration useless.
-  # clear-goroot-cache)
-  #   shift
-  #   execClearGorootCache "$@"
-  #   exit $?
-  #   ;;
+  clear-goroot-cache)
+    shift
+    execClearGorootCache "$@"
+    exit $?
+    ;;
   *)
     usageGlobal
     exit 1
