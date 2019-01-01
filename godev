@@ -40,12 +40,14 @@ godev clear-source-cache
 GDDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 GOGITDIR="$GDDIR/data/go.git"
 GOSRCROOT="$GDDIR/data/go-src"
-GOBINROOT="$GDDIR/data/go-bin"
+GOBINCACHEROOT="$GDDIR/data/go-bincache"
 
 # Internals:
 # $GOGITDIR holds bare clone of golang/go
 # $GOSRCROOT is where git worktrees go
-# $GOBINROOT is where built go binaries live
+# $GOBINCACHEROOT is where built go binaries are cached.
+#   We execute from GOSRCROOT, not GOBINCACHEROOT,
+#   because the go internals incorrectly infer the latter to be a GOROOT.
 
 function gogit() {
   git --git-dir "$GOGITDIR" "$@"
@@ -87,13 +89,13 @@ function execBuild() {
   if [ "$sha" = 'tip' ]; then
     # It would be nice to just ln -sf, but if the tip directory already exists,
     # that will create a new recursive softlink to $fullSHA.
-    rm -f "$GOBINROOT/tip"
-    ln -s "$GOBINROOT/$fullSHA" "$GOBINROOT/tip"
+    rm -f "$GOBINCACHEROOT/tip"
+    ln -s "$GOBINCACHEROOT/$fullSHA" "$GOBINCACHEROOT/tip"
   fi
 }
 
 function execBuildFullSHA() {
-  local binDir="$GOBINROOT/$fullSHA"
+  local binDir="$GOBINCACHEROOT/$fullSHA"
   if [ -x "$binDir/bin/go" ]; then
     >&2 echo "go binary for $fullSHA already exists."
     return
@@ -126,7 +128,7 @@ function execRun() {
   local sha="$1"
   local fullSHA
   if [ "$sha" = 'tip' ]; then
-    local tipDir="$GOBINROOT/tip"
+    local tipDir="$GOBINCACHEROOT/tip"
     if [ ! -d "$tipDir" ]; then
       >&2 echo "go tip has never been built."
       >&2 echo "Run 'godev build tip'."
@@ -140,7 +142,7 @@ function execRun() {
 
   shift
 
-  local binDir="$GOBINROOT/$fullSHA"
+  local binDir="$GOBINCACHEROOT/$fullSHA"
   if [ ! -d "$binDir" ]; then
     >&2 echo "go revision $sha has not been built."
     >&2 echo "Run 'godev build $sha' or use 'godev -S $sha' to lazily build it."
@@ -154,7 +156,7 @@ function execRun() {
     linkBinAndTools "$binDir" "$srcDir"
   fi
 
-  "$binDir/bin/go" "$@"
+  "$srcDir/bin/go" "$@"
 }
 
 function execRunLazyBuild() {
@@ -166,7 +168,7 @@ function execRunLazyBuild() {
 
   shift
 
-  local binDir="$GOBINROOT/$fullSHA"
+  local binDir="$GOBINCACHEROOT/$fullSHA"
   if [ ! -d "$binDir" ] || [ ! -x "$binDir/bin/go" ]; then
     # We didn't have the binary, so assume it needs built.
     >&2 echo "Building go revision $sha..."
@@ -180,14 +182,14 @@ function execRunLazyBuild() {
     linkBinAndTools "$binDir" "$srcDir"
   fi
 
-  "$binDir/bin/go" "$@"
+  "$srcDir/bin/go" "$@"
 }
 
 function execList() {
   # TODO: handle -h/--help
   # TODO: reject $# > 0
 
-  if [ ! -d "$GOBINROOT" ]; then
+  if [ ! -d "$GOBINCACHEROOT" ]; then
     >&2 echo "No version of go has been built yet."
     return 1
   fi
@@ -199,7 +201,7 @@ function execList() {
 
   # shellcheck disable=2046
   gogit show -s --format="%ci [%h] %s" $(
-    cd "$GOBINROOT"
+    cd "$GOBINCACHEROOT"
     for dir in *; do
       # Avoid weird error if glob didn't match anything.
       [ -e "$dir" ] || continue
@@ -228,7 +230,7 @@ function execRemoveSHA() {
     gogit worktree remove "$srcDir"
   fi
 
-  local binDir="$GOBINROOT/$fullSHA"
+  local binDir="$GOBINCACHEROOT/$fullSHA"
   if [ ! -d "$binDir" ]; then
     >&2 echo "No built binaries for $fullSHA."
     return 1
